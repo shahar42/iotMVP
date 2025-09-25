@@ -56,6 +56,54 @@ async def make_real_render_request(
             except json.JSONDecodeError:
                 return {"raw_response": response_text}
 
+def _detect_framework_from_file(file_path: str) -> str:
+    """Detect framework type from configuration file"""
+    try:
+        if file_path.endswith('package.json'):
+            with open(file_path, 'r') as f:
+                package_data = json.load(f)
+
+            dependencies = {**package_data.get('dependencies', {}), **package_data.get('devDependencies', {})}
+
+            if 'react' in dependencies:
+                if 'vite' in dependencies:
+                    return 'React (Vite)'
+                elif 'react-scripts' in dependencies:
+                    return 'React (CRA)'
+                else:
+                    return 'React'
+            elif 'vue' in dependencies:
+                return 'Vue.js'
+            elif '@angular/core' in dependencies:
+                return 'Angular'
+            elif 'next' in dependencies:
+                return 'Next.js'
+            else:
+                return 'Node.js'
+
+        elif file_path.endswith('requirements.txt'):
+            with open(file_path, 'r') as f:
+                content = f.read().lower()
+
+            if 'flask' in content:
+                return 'Flask'
+            elif 'django' in content:
+                return 'Django'
+            elif 'fastapi' in content:
+                return 'FastAPI'
+            else:
+                return 'Python'
+
+        elif file_path.endswith('pyproject.toml'):
+            return 'Python (Modern)'
+        elif file_path.endswith('Dockerfile'):
+            return 'Docker'
+        else:
+            return 'Unknown'
+
+    except Exception:
+        return 'Unknown'
+
 async def run_curl(url: str, method: str = "GET", data: Optional[Dict] = None) -> Dict[str, Any]:
     """Run curl command and return parsed JSON response"""
     cmd = ["curl", "-s", "-w", "%{http_code}"]
@@ -229,54 +277,79 @@ def register_enhanced_deployment_tools(mcp):
             cwd = os.getcwd()
             project_candidates = []
 
-            # Check current directory
-            if os.path.exists(os.path.join(cwd, 'package.json')):
-                project_candidates.append((cwd, "ROOT", "Current directory"))
+            # Check current directory for different project types
+            project_files = ['package.json', 'requirements.txt', 'pyproject.toml', 'Dockerfile']
+            for project_file in project_files:
+                if os.path.exists(os.path.join(cwd, project_file)):
+                    framework = _detect_framework_from_file(os.path.join(cwd, project_file))
+                    project_candidates.append((cwd, "ROOT", "Current directory", framework, project_file))
+                    break
 
-            # Check common subdirectories
-            common_dirs = ['src', 'app', 'frontend', 'client', 'web', 'www']
+            # Check subdirectories for different project types
             for subdir in os.listdir(cwd):
                 if os.path.isdir(subdir):
                     subpath = os.path.join(cwd, subdir)
-                    if os.path.exists(os.path.join(subpath, 'package.json')):
-                        project_candidates.append((subpath, "SUBDIR", f"Subdirectory: {subdir}/"))
+                    for project_file in project_files:
+                        if os.path.exists(os.path.join(subpath, project_file)):
+                            framework = _detect_framework_from_file(os.path.join(subpath, project_file))
+                            project_candidates.append((subpath, "SUBDIR", f"Subdirectory: {subdir}/", framework, project_file))
+                            break
 
-            # Also check for nested projects (like our daily-quote case)
+            # Also check for nested projects
             for root, dirs, files in os.walk(cwd):
-                if 'package.json' in files and root != cwd:
-                    # Skip if already found as direct subdirectory
-                    rel_path = os.path.relpath(root, cwd)
-                    if not any(rel_path.startswith(f"{cand[1]}/") for cand in project_candidates):
-                        project_candidates.append((root, "NESTED", f"Nested project: {rel_path}/"))
+                for project_file in project_files:
+                    if project_file in files and root != cwd:
+                        # Skip if already found as direct subdirectory
+                        rel_path = os.path.relpath(root, cwd)
+                        if not any(rel_path.startswith(f"{cand[1]}/") for cand in project_candidates):
+                            framework = _detect_framework_from_file(os.path.join(root, project_file))
+                            project_candidates.append((root, "NESTED", f"Nested project: {rel_path}/", framework, project_file))
+                            break
 
             results.append("📦 PROJECT STRUCTURE ANALYSIS:")
             if project_candidates:
                 results.append(f"Found {len(project_candidates)} potential project(s):")
-                for i, (path, location_type, description) in enumerate(project_candidates, 1):
+                for i, (path, location_type, description, framework, config_file) in enumerate(project_candidates, 1):
                     results.append(f"  [{i}] {description}")
                     results.append(f"      Path: {path}")
-                    # Quick analysis of this project
+                    results.append(f"      Framework: {framework}")
+                    results.append(f"      Config: {config_file}")
+                    # Quick analysis based on project type
                     try:
-                        with open(os.path.join(path, 'package.json'), 'r') as f:
-                            package_data = json.load(f)
-                        project_name = package_data.get('name', 'unnamed')
-                        has_build_script = 'build' in package_data.get('scripts', {})
-                        results.append(f"      Name: {project_name}")
-                        results.append(f"      Has build script: {'✅' if has_build_script else '❌'}")
-                    except:
-                        results.append(f"      Could not read package.json details")
+                        if config_file == 'package.json':
+                            with open(os.path.join(path, 'package.json'), 'r') as f:
+                                package_data = json.load(f)
+                            project_name = package_data.get('name', 'unnamed')
+                            has_build_script = 'build' in package_data.get('scripts', {})
+                            results.append(f"      Name: {project_name}")
+                            results.append(f"      Has build script: {'✅' if has_build_script else '❌'}")
+                        elif config_file == 'requirements.txt':
+                            # Check if it's a Flask/Django app
+                            with open(os.path.join(path, 'requirements.txt'), 'r') as f:
+                                deps = f.read().lower()
+                            if 'flask' in deps:
+                                results.append(f"      Type: Flask application")
+                            elif 'django' in deps:
+                                results.append(f"      Type: Django application")
+                            else:
+                                results.append(f"      Type: Python application")
+                        else:
+                            results.append(f"      Analysis: Ready to deploy")
+                    except Exception as e:
+                        results.append(f"      Could not analyze project details: {str(e)}")
                     results.append("")
 
                 results.append("🎯 RECOMMENDATION:")
-                if any(loc_type == "ROOT" for _, loc_type, _ in project_candidates):
+                if any(loc_type == "ROOT" for _, loc_type, _, _, _ in project_candidates):
                     results.append("✅ Deploy from ROOT (current directory) - already properly structured")
                 else:
                     best_candidate = project_candidates[0]
                     results.append(f"💡 Consider deploying from: {best_candidate[2]}")
                     results.append(f"⚠️  OR move files to root directory for Render compatibility")
             else:
-                results.append("❌ No Node.js projects detected (no package.json found)")
-                results.append("💡 This might be a Python project or needs project initialization")
+                results.append("❌ No deployable projects detected")
+                results.append("💡 Looking for: package.json, requirements.txt, pyproject.toml, or Dockerfile")
+                results.append("💡 Initialize your project with the appropriate configuration file")
 
             results.append("")
 
@@ -791,19 +864,57 @@ def register_enhanced_deployment_tools(mcp):
             # 1.3: Build Environment Analysis
             deployment_log.append("🔧 Analyzing build environment...")
             current_dir = os.getcwd()
-            build_result = await validate_build_environment(current_dir)
 
-            # Extract build commands (simple parsing)
-            build_command = "npm install && npm run build"
-            start_command = "npx serve -s dist -l 10000"
+            # Detect project type and framework
+            project_files = ['package.json', 'requirements.txt', 'pyproject.toml', 'Dockerfile']
+            detected_framework = None
+            detected_file = None
+            build_command = None
+            start_command = None
+            runtime = "python"
 
-            if "react-vite" in build_result:
-                build_command = "npm install && npm run build"
-                start_command = "npx serve -s dist -l 10000"
-            elif "react-cra" in build_result:
-                build_command = "npm ci --include=dev && npm run build"
-                start_command = "npx serve -s build -l 10000"
+            for project_file in project_files:
+                if os.path.exists(os.path.join(current_dir, project_file)):
+                    detected_framework = _detect_framework_from_file(os.path.join(current_dir, project_file))
+                    detected_file = project_file
+                    break
 
+            # Generate build commands based on detected framework
+            if detected_file == 'requirements.txt':
+                runtime = "python"
+                if 'Flask' in detected_framework:
+                    build_command = "pip install -r requirements.txt"
+                    start_command = "python app.py"
+                elif 'Django' in detected_framework:
+                    build_command = "pip install -r requirements.txt && python manage.py collectstatic --noinput"
+                    start_command = "python manage.py runserver 0.0.0.0:$PORT"
+                else:
+                    build_command = "pip install -r requirements.txt"
+                    start_command = "python main.py"
+
+            elif detected_file == 'package.json':
+                runtime = "node"
+                if 'React (Vite)' in detected_framework:
+                    build_command = "npm install && npm run build"
+                    start_command = "npx serve -s dist -l $PORT"
+                elif 'React (CRA)' in detected_framework:
+                    build_command = "npm ci --include=dev && npm run build"
+                    start_command = "npx serve -s build -l $PORT"
+                elif 'Next.js' in detected_framework:
+                    build_command = "npm install && npm run build"
+                    start_command = "npm start"
+                else:
+                    build_command = "npm install && npm run build"
+                    start_command = "npx serve -s dist -l $PORT"
+
+            else:
+                # Default fallback
+                deployment_log.append("⚠️  WARNING: No recognized project files found")
+                deployment_log.append("💡 SOLUTION: Add package.json (Node.js) or requirements.txt (Python)")
+                return "\\n".join(deployment_log)
+
+            deployment_log.append(f"✅ Detected: {detected_framework} ({detected_file})")
+            deployment_log.append(f"✅ Runtime: {runtime}")
             deployment_log.append(f"✅ Build: {build_command}")
             deployment_log.append(f"✅ Start: {start_command}")
             deployment_log.append("")
@@ -839,6 +950,16 @@ def register_enhanced_deployment_tools(mcp):
                             deploy_branch = line.split("Branch: ")[1].strip()
                             break
 
+                # Determine if we need to set a subdirectory (rootDirectory)
+                root_directory = None
+                if detected_file and not os.path.exists(os.path.join(current_dir, detected_file)):
+                    # The project file might be in a subdirectory
+                    for root, dirs, files in os.walk(current_dir):
+                        if detected_file in files:
+                            root_directory = os.path.relpath(root, current_dir)
+                            deployment_log.append(f"📁 Using subdirectory: {root_directory}")
+                            break
+
                 payload = {
                     "ownerId": workspace_id,
                     "type": "web_service",
@@ -846,13 +967,18 @@ def register_enhanced_deployment_tools(mcp):
                     "repo": repo_url,
                     "branch": deploy_branch,
                     "serviceDetails": {
-                        "runtime": "node",
+                        "runtime": runtime,
                         "envSpecificDetails": {
                             "buildCommand": build_command,
                             "startCommand": start_command
                         }
                     }
                 }
+
+                # Add rootDirectory if project is in subdirectory
+                if root_directory and root_directory != ".":
+                    payload["serviceDetails"]["rootDirectory"] = root_directory
+                    deployment_log.append(f"📂 Root directory set to: {root_directory}")
 
                 result = await make_real_render_request("POST", "/services", RENDER_API_KEY, payload)
                 service_id = result.get("service", {}).get("id", "unknown")
@@ -877,21 +1003,38 @@ def register_enhanced_deployment_tools(mcp):
                 for attempt in range(max_attempts):
                     await asyncio.sleep(10)  # Wait 10 seconds between checks
                     try:
-                        # Get deployment status
+                        # Get deployment status using correct API endpoints
                         service_info = await make_real_render_request("GET", f"/services/{service_id}", RENDER_API_KEY)
-                        deployments = await make_real_render_request("GET", f"/services/{service_id}/deploys?limit=1", RENDER_API_KEY)
+                        deployments = await make_real_render_request("GET", f"/services/{service_id}/deploys", RENDER_API_KEY)
 
-                        if deployments and len(deployments) > 0:
-                            latest_deploy = deployments[0]
+                        # Handle different response formats from Render API
+                        deploy_list = deployments
+                        if isinstance(deployments, dict) and 'deploys' in deployments:
+                            deploy_list = deployments['deploys']
+                        elif isinstance(deployments, dict) and 'data' in deployments:
+                            deploy_list = deployments['data']
+
+                        if deploy_list and len(deploy_list) > 0:
+                            latest_deploy = deploy_list[0]
                             status = latest_deploy.get("status", "unknown")
-                            deployment_log.append(f"   Status: {status}")
+                            deployment_log.append(f"   Status: {status} (attempt {attempt + 1})")
 
                             if status == "live":
                                 deployment_log.append("✅ Deployment completed successfully!")
                                 break
-                            elif status in ["build_failed", "failed"]:
+                            elif status in ["build_failed", "failed", "canceled"]:
                                 deployment_log.append(f"❌ Deployment failed with status: {status}")
+                                # Get build failure details
+                                try:
+                                    failure_reason = latest_deploy.get("finishedAtMessage", "No details available")
+                                    deployment_log.append(f"   Failure reason: {failure_reason}")
+                                except:
+                                    pass
                                 break
+                        else:
+                            deployment_log.append(f"   No deployment found (attempt {attempt + 1})")
+                            if attempt == 0:  # First attempt, might need to wait for deployment to start
+                                continue
 
                         if attempt > 20:  # After 3+ minutes, show progress
                             deployment_log.append(f"   Still deploying... (attempt {attempt}/30)")
