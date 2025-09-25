@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Message Board</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 2rem;
+            color: white;
+        }
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+        }
+        .input-group {
+            margin-bottom: 1rem;
+        }
+        .input-group textarea {
+            width: 100%;
+            padding: 1rem;
+            border: 2px solid #e1e5e9;
+            border-radius: 8px;
+            font-size: 1rem;
+            transition: border-color 0.3s;
+        }
+        .input-group textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 0.75rem 2rem;
+            border-radius: 8px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        .btn:hover {
+            transform: translateY(-2px);
+        }
+        .message {
+            background: #f8f9fa;
+            border-left: 4px solid #667eea;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            border-radius: 4px;
+        }
+        .message-time {
+            font-size: 0.9rem;
+            color: #6c757d;
+            margin-top: 0.5rem;
+        }
+        .loading {
+            text-align: center;
+            color: #666;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📝 Message Board</h1>
+            <p>Share your thoughts with the world</p>
+        </div>
+
+        <div class="card">
+            <div class="input-group">
+                <textarea id="messageInput" placeholder="What's on your mind?" rows="3"></textarea>
+            </div>
+            <button class="btn" onclick="addMessage()">Post Message</button>
+        </div>
+
+        <div class="card">
+            <h2 style="margin-bottom: 1rem; color: #333;">Recent Messages</h2>
+            <div id="messages" class="loading">Loading messages...</div>
+        </div>
+    </div>
+
+    <script>
+        async function loadMessages() {
+            try {
+                const response = await fetch('/api/messages');
+                const messages = await response.json();
+
+                const container = document.getElementById('messages');
+
+                if (messages.length === 0) {
+                    container.innerHTML = '<p>No messages yet. Be the first to post!</p>';
+                    return;
+                }
+
+                container.innerHTML = messages.map(msg => `
+                    <div class="message">
+                        <div>${msg.content}</div>
+                        <div class="message-time">${new Date(msg.created_at).toLocaleString()}</div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('Error loading messages:', error);
+                document.getElementById('messages').innerHTML = '<p style="color: red;">Error loading messages</p>';
+            }
+        }
+
+        async function addMessage() {
+            const input = document.getElementById('messageInput');
+            const content = input.value.trim();
+
+            if (!content) {
+                alert('Please enter a message!');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/messages', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ content }),
+                });
+
+                if (response.ok) {
+                    input.value = '';
+                    loadMessages();
+                } else {
+                    alert('Error posting message');
+                }
+            } catch (error) {
+                console.error('Error posting message:', error);
+                alert('Error posting message');
+            }
+        }
+
+        // Load messages on page load
+        loadMessages();
+
+        // Auto-refresh messages every 30 seconds
+        setInterval(loadMessages, 30000);
+    </script>
+</body>
+</html>
