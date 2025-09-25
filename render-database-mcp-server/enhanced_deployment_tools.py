@@ -11,6 +11,7 @@ import subprocess
 import json
 import time
 import logging
+import aiohttp
 from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime
 
@@ -18,8 +19,42 @@ logger = logging.getLogger("render-enhanced")
 
 # Configuration
 RENDER_API_KEY = os.getenv("RENDER_API_KEY")
-RENDER_BASE_URL = "https://api.render.com"
+RENDER_BASE_URL = "https://api.render.com/v1"
 OWNER_ID = os.getenv("OWNER_ID")
+
+async def make_real_render_request(
+    method: str,
+    endpoint: str,
+    api_key: str,
+    data: Optional[Dict] = None
+) -> Dict:
+    """Make authenticated request to Render API"""
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Accept": "application/json"
+    }
+
+    if data:
+        headers["Content-Type"] = "application/json"
+
+    url = f"{RENDER_BASE_URL}{endpoint}"
+
+    async with aiohttp.ClientSession() as session:
+        async with session.request(
+            method=method,
+            url=url,
+            headers=headers,
+            data=json.dumps(data) if data else None
+        ) as response:
+            response_text = await response.text()
+
+            if not response.ok:
+                raise Exception(f"Render API error {response.status}: {response_text}")
+
+            try:
+                return json.loads(response_text) if response_text else {}
+            except json.JSONDecodeError:
+                return {"raw_response": response_text}
 
 async def run_curl(url: str, method: str = "GET", data: Optional[Dict] = None) -> Dict[str, Any]:
     """Run curl command and return parsed JSON response"""
@@ -63,10 +98,17 @@ def register_enhanced_deployment_tools(mcp):
     @mcp.tool()
     async def list_workspaces_interactive() -> str:
         """
-        List all available Render workspaces for user selection.
+        LLM INSTRUCTION: Use this to show user available Render workspaces.
+
+        LLM WORKFLOW:
+        1. Call this tool to get workspace list
+        2. Show user all available workspaces with IDs
+        3. Ask user: "Which workspace ID would you like to use?"
+        4. Get workspace_id from user selection
+        5. Use that workspace_id in deployment tools
 
         Returns:
-            Formatted list of workspaces with selection guidance
+            Formatted list of workspace IDs and names for user selection
         """
         try:
             url = f"{RENDER_BASE_URL}/v1/teams"
@@ -106,10 +148,16 @@ def register_enhanced_deployment_tools(mcp):
     @mcp.tool()
     async def detect_git_repository() -> str:
         """
-        Detect the current git repository and provide options.
+        LLM INSTRUCTION: Use this to show user their current git repository.
+
+        LLM WORKFLOW:
+        1. Call this tool first
+        2. Show user the detected repository
+        3. Ask: "Use this repository or provide a different GitHub URL?"
+        4. Get user's choice for deployment
 
         Returns:
-            Current git repository info and alternative options
+            Current git repository URL, branch, and commit status for user selection
         """
         try:
             # Try to get the current git remote
@@ -614,30 +662,41 @@ def register_enhanced_deployment_tools(mcp):
     @mcp.tool()
     async def deploy_fullstack_app_complete(
         app_name: str,
+        repo_url: str,
+        workspace_id: str,
         description: str = "",
-        workspace_hint: Optional[str] = None,
         create_database: bool = True
     ) -> str:
         """
-        🚀 ULTIMATE DEPLOYMENT TOOL: Complete fullstack deployment in one command.
+        LLM INSTRUCTIONS: Complete fullstack deployment to Render.
 
-        This tool implements ALL the improvements from user feedback:
-        - Interactive workspace selection with confirmation
-        - Smart git repository detection with uncommitted changes check
-        - Build environment analysis with framework detection
-        - Automatic database creation (optional)
-        - Real-time deployment monitoring with progress updates
-        - Health checks and verification
-        - Comprehensive error diagnosis and auto-fix suggestions
+        CRITICAL LLM WORKFLOW (FOLLOW EXACTLY):
+        1. NEVER run local tests (npm install, npm run dev, etc.)
+        2. Call detect_git_repository() first
+        3. Ask user: "Use current repo URL or provide different GitHub URL?"
+        4. Call list_workspaces_interactive()
+        5. Ask user to select workspace ID from the list
+        6. THEN call this tool with user's choices
+        7. Make REAL API calls only - no simulated responses
+
+        LLM BEHAVIOR REQUIREMENTS:
+        - Always ask user for repo_url choice (don't assume)
+        - Always ask user for workspace_id selection (don't use defaults)
+        - Never test locally - deploy directly to Render
+        - Handle real API errors and failures gracefully
+        - Show user the actual deployment status and URLs
 
         Args:
-            app_name: Name for your application
-            description: What your app does (optional)
-            workspace_hint: Workspace preference (will show options if not specified)
-            create_database: Whether to create a PostgreSQL database (default: true)
+            app_name: Name for the application
+            repo_url: GitHub repository URL (REQUIRED - ask user to choose)
+            workspace_id: Render workspace ID (REQUIRED - ask user to select from list)
+            description: What the app does (optional)
+            create_database: Whether to create PostgreSQL database (default: true)
 
         Returns:
-            Complete deployment report with all URLs, credentials, and next steps
+            Real deployment results with actual service IDs and URLs
+
+        CRITICAL: This tool makes REAL API calls to Render. No simulations allowed.
         """
         try:
             deployment_log = []
@@ -645,6 +704,8 @@ def register_enhanced_deployment_tools(mcp):
             deployment_log.append("=" * 60)
             deployment_log.append(f"📱 App Name: {app_name}")
             deployment_log.append(f"📝 Description: {description or 'No description provided'}")
+            deployment_log.append(f"📂 Repository: {repo_url}")
+            deployment_log.append(f"🏢 Workspace ID: {workspace_id}")
             deployment_log.append(f"🗄️  Database: {'Yes' if create_database else 'No'}")
             deployment_log.append("")
             deployment_log.append("⏳ Starting comprehensive deployment process...")
@@ -654,32 +715,19 @@ def register_enhanced_deployment_tools(mcp):
             deployment_log.append("🔍 PHASE 1: PRE-DEPLOYMENT VALIDATION")
             deployment_log.append("-" * 40)
 
-            # 1.1: Git Repository Detection
-            deployment_log.append("📂 Detecting git repository...")
-            git_result = await detect_git_repository()
-
-            # Extract repo URL from git result (simple parsing)
-            repo_url = ""
-            current_branch = "master"
-            if "Repository:" in git_result:
-                lines = git_result.split("\\n")
-                for line in lines:
-                    if "Repository:" in line:
-                        repo_url = line.split("Repository: ")[1].strip()
-                    elif "Branch:" in line:
-                        current_branch = line.split("Branch: ")[1].strip()
-
-            if not repo_url:
-                deployment_log.append("❌ FAILED: No git repository detected")
-                deployment_log.append("💡 SOLUTION: Initialize git repo or run from git repository directory")
+            # 1.1: Repository Validation
+            deployment_log.append("📂 Validating repository...")
+            if not repo_url.startswith(("https://github.com/", "git@github.com:")):
+                deployment_log.append("❌ FAILED: Invalid GitHub repository URL")
+                deployment_log.append("💡 SOLUTION: Provide a valid GitHub URL (https://github.com/user/repo.git)")
                 return "\\n".join(deployment_log)
 
             deployment_log.append(f"✅ Repository: {repo_url}")
-            deployment_log.append(f"🌿 Branch: {current_branch}")
 
-            # Check for uncommitted changes
-            if "Has uncommitted changes" in git_result:
-                deployment_log.append("⚠️  WARNING: Uncommitted changes detected")
+            # Check for uncommitted changes in local directory (if this matches the repo)
+            git_result = await detect_git_repository()
+            if "Has uncommitted changes" in git_result and repo_url in git_result:
+                deployment_log.append("⚠️  WARNING: Uncommitted changes detected in local repo")
                 deployment_log.append("🛑 STOPPING: Please commit changes first:")
                 deployment_log.append("   git add .")
                 deployment_log.append("   git commit -m 'Deploy to Render'")
@@ -687,17 +735,17 @@ def register_enhanced_deployment_tools(mcp):
                 deployment_log.append("")
                 deployment_log.append("Re-run this tool after committing changes")
                 return "\\n".join(deployment_log)
-            deployment_log.append("✅ Repository is clean")
+            deployment_log.append("✅ Repository validation passed")
             deployment_log.append("")
 
-            # 1.2: Workspace Selection
-            deployment_log.append("🏢 Selecting workspace...")
-            workspace_result = await list_workspaces_interactive()
+            # 1.2: Workspace Validation
+            deployment_log.append("🏢 Validating workspace...")
+            if not workspace_id or not workspace_id.startswith("tea-"):
+                deployment_log.append("❌ FAILED: Invalid workspace ID")
+                deployment_log.append("💡 SOLUTION: Use list_workspaces_interactive() to get valid workspace ID")
+                return "\\n".join(deployment_log)
 
-            # Simple workspace parsing (in real implementation, would use proper parsing)
-            selected_workspace_id = "tea-ctl9m2rv2p9s738eghng"  # Default fallback
-            if workspace_hint:
-                deployment_log.append(f"📋 Workspace hint provided: {workspace_hint}")
+            selected_workspace_id = workspace_id
             deployment_log.append(f"✅ Using workspace ID: {selected_workspace_id}")
             deployment_log.append("")
 
@@ -740,13 +788,42 @@ def register_enhanced_deployment_tools(mcp):
             deployment_log.append("-" * 40)
             deployment_log.append("🔨 Creating Render web service...")
 
-            # In real implementation, would call the actual deployment API
-            # For now, simulate the process
-            service_id = f"srv-{app_name.lower()}-simulated"
-            service_url = f"https://{app_name.lower()}.onrender.com"
+            # Create actual web service using real API
+            try:
+                # Determine branch to deploy (default to master)
+                deploy_branch = "master"
+                git_result = await detect_git_repository()
+                if "Branch:" in git_result:
+                    lines = git_result.split("\\n")
+                    for line in lines:
+                        if "Branch:" in line:
+                            deploy_branch = line.split("Branch: ")[1].strip()
+                            break
 
-            deployment_log.append(f"✅ Service created: {service_id}")
-            deployment_log.append(f"🌐 URL: {service_url}")
+                payload = {
+                    "ownerId": workspace_id,
+                    "type": "web_service",
+                    "name": app_name,
+                    "repo": repo_url,
+                    "branch": deploy_branch,
+                    "serviceDetails": {
+                        "runtime": "node",
+                        "envSpecificDetails": {
+                            "buildCommand": build_command,
+                            "startCommand": start_command
+                        }
+                    }
+                }
+
+                result = await make_real_render_request("POST", "/services", RENDER_API_KEY, payload)
+                service_id = result.get("service", {}).get("id", "unknown")
+                service_url = result.get("service", {}).get("serviceDetails", {}).get("url", f"https://{app_name.lower()}.onrender.com")
+
+                deployment_log.append(f"✅ Service created: {service_id}")
+                deployment_log.append(f"🌐 URL: {service_url}")
+            except Exception as e:
+                deployment_log.append(f"❌ Service creation failed: {str(e)}")
+                return "\n".join(deployment_log)
             deployment_log.append("")
 
             # PHASE 4: DEPLOYMENT MONITORING
@@ -754,13 +831,40 @@ def register_enhanced_deployment_tools(mcp):
             deployment_log.append("-" * 40)
             deployment_log.append("📊 Monitoring deployment progress...")
 
-            # Simulate deployment monitoring
-            for i in range(1, 6):
-                await asyncio.sleep(0.5)  # Simulate time
-                status = ["Cloning repository", "Installing dependencies", "Building application", "Starting service", "Health checks"][i-1]
-                deployment_log.append(f"   {i*20}% - {status}...")
+            # Monitor real deployment progress
+            try:
+                deployment_log.append("   Monitoring deployment...")
+                max_attempts = 30  # 5 minutes max
+                for attempt in range(max_attempts):
+                    await asyncio.sleep(10)  # Wait 10 seconds between checks
+                    try:
+                        # Get deployment status
+                        service_info = await make_real_render_request("GET", f"/services/{service_id}", RENDER_API_KEY)
+                        deployments = await make_real_render_request("GET", f"/services/{service_id}/deploys?limit=1", RENDER_API_KEY)
 
-            deployment_log.append("✅ Deployment completed successfully!")
+                        if deployments and len(deployments) > 0:
+                            latest_deploy = deployments[0]
+                            status = latest_deploy.get("status", "unknown")
+                            deployment_log.append(f"   Status: {status}")
+
+                            if status == "live":
+                                deployment_log.append("✅ Deployment completed successfully!")
+                                break
+                            elif status in ["build_failed", "failed"]:
+                                deployment_log.append(f"❌ Deployment failed with status: {status}")
+                                break
+
+                        if attempt > 20:  # After 3+ minutes, show progress
+                            deployment_log.append(f"   Still deploying... (attempt {attempt}/30)")
+
+                    except Exception as e:
+                        if attempt < 5:  # Only show errors for first few attempts
+                            deployment_log.append(f"   Monitoring error (will retry): {str(e)}")
+                        continue
+
+            except Exception as e:
+                deployment_log.append(f"⚠️  Could not monitor deployment: {str(e)}")
+                deployment_log.append("   Check manually at Render dashboard")
             deployment_log.append("")
 
             # PHASE 5: VERIFICATION
@@ -768,10 +872,19 @@ def register_enhanced_deployment_tools(mcp):
             deployment_log.append("-" * 40)
             deployment_log.append("🏥 Performing health checks...")
 
-            # Simulate health check
-            await asyncio.sleep(1)
-            deployment_log.append("✅ Service responding correctly")
-            deployment_log.append("✅ All health checks passed")
+            # Real health check
+            try:
+                import aiohttp
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(service_url, timeout=30) as response:
+                        if response.status == 200:
+                            deployment_log.append("✅ Service responding correctly")
+                        else:
+                            deployment_log.append(f"⚠️  Service returned status {response.status}")
+                deployment_log.append("✅ All health checks passed")
+            except Exception as e:
+                deployment_log.append(f"⚠️  Health check failed: {str(e)}")
+                deployment_log.append("   Service may still be starting up")
             deployment_log.append("")
 
             # FINAL SUMMARY

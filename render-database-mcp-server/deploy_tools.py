@@ -264,14 +264,16 @@ Check the Render dashboard for build logs and deployment status."""]
         api_key: str = "rnd_j6WyOXSMG0bGFbqyYKMBaxUgzF4s"
     ) -> str:
         """
-        Create a new web service on Render with automatic workspace discovery.
+        LLM INSTRUCTION: Create Render web service with automatic workspace discovery.
 
-        LLM-FRIENDLY: Automatically discovers and selects the best workspace,
-        then creates the web service with clear feedback about workspace selection.
+        LLM BEHAVIOR:
+        - NEVER run local tests (npm install, npm run dev) before deployment
+        - This tool makes REAL API calls to Render (no simulations)
+        - Use exact repository URLs provided by user
+        - Handle real API errors gracefully
+        - Return actual service IDs and URLs from Render API
 
-        IMPORTANT: Render API requires payment information even for free tier services.
-        This function will discover the correct workspace but may fail at service creation
-        if payment info is not configured.
+        CRITICAL: This function makes real API calls. Service creation requires valid payment info.
 
         Args:
             name: Service name
@@ -388,33 +390,23 @@ ORIGINAL_ERROR: {error_msg}"""
         api_key: str = "rnd_j6WyOXSMG0bGFbqyYKMBaxUgzF4s"
     ) -> str:
         """
-        Create a new web service on Render.
+        LLM INSTRUCTION: Create Render web service with specific configuration.
 
-        IMPORTANT: Ensure the GitHub repository URL is publicly accessible and the specified
-        branch exists before creating the service. Verify the repository can be fetched at
-        https://github.com/{owner}/{repo} and that the branch name is correct.
+        LLM CRITICAL BEHAVIOR:
+        - NEVER run local tests (npm install, npm run dev, yarn start, etc.)
+        - NEVER test locally before deployment
+        - Make REAL API calls to Render only
+        - Trust user's repository URL exactly as provided
+        - Ensure user has committed changes before calling this tool
 
-        USAGE PATTERN: User provides repository URL, LLM trusts that the current working directory
-        corresponds to that repository. DO NOT question or validate the repository URL - trust
-        the user's specification and use it directly.
+        LLM WORKFLOW:
+        1. User provides repository URL and configuration
+        2. Verify user has committed and pushed changes
+        3. Call this tool with exact parameters
+        4. Handle real API responses and errors
+        5. Return actual service ID and URL from Render
 
-        UX DESIGN PRINCIPLES: Prioritize intuitive user experience - make navigation effortless
-        and every element purposeful. Use clear visual hierarchy and responsive design that
-        works on all devices.
-
-        VISUAL APPEAL: When creating web applications, focus on small actions with high visual
-        impact - add CSS styling, use attractive colors, include nice typography, and add
-        simple animations. These small touches make applications look professional and engaging
-        with minimal effort.
-
-        LAYOUT DESIGN: Default to creating full-width layouts for web applications.
-
-        CRITICAL GIT WORKFLOW: Any new files or changes made locally MUST be committed and pushed
-        to the remote repository BEFORE creating the service. Always remind the user:
-        1. git add .
-        2. git commit -m "Add files for deployment"
-        3. git push
-        Then create the service.
+        CRITICAL: This makes real API calls to create actual Render services.
 
         Args:
             name: Service name
