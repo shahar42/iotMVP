@@ -98,69 +98,94 @@ def register_enhanced_deployment_tools(mcp):
     @mcp.tool()
     async def list_workspaces_interactive() -> str:
         """
-        LLM INSTRUCTION: Use this to show user available Render workspaces.
+        LLM INSTRUCTION: ALWAYS call this before deployment to show workspace choices.
 
         LLM WORKFLOW:
         1. Call this tool to get workspace list
-        2. Show user all available workspaces with IDs
-        3. Ask user: "Which workspace ID would you like to use?"
-        4. Get workspace_id from user selection
-        5. Use that workspace_id in deployment tools
+        2. Show user: "SELECT WORKSPACE: [1] Name (ID) [2] Name (ID)..."
+        3. Ask user: "Which workspace number do you want to use? (1, 2, 3...)"
+        4. Get user's choice and extract the workspace_id
+        5. Use that workspace_id as ownerId in deployment calls
+
+        CRITICAL: Never use default workspace - always require user selection!
 
         Returns:
-            Formatted list of workspace IDs and names for user selection
+            Formatted workspace choices with clear selection instructions
         """
         try:
-            url = f"{RENDER_BASE_URL}/v1/teams"
+            # Use the correct owners endpoint to list workspaces
+            url = f"{RENDER_BASE_URL}/owners"
             response = await run_curl(url)
 
-            teams = response if isinstance(response, list) else []
+            owners = response if isinstance(response, list) else []
 
-            if not teams:
-                return "WORKSPACE: No workspaces found - using default workspace"
+            if not owners:
+                return "❌ ERROR: No workspaces accessible\n💡 Check your Render API key permissions"
 
             formatted = []
-            formatted.append("WORKSPACE: Available Workspaces")
-            formatted.append("=" * 40)
+            formatted.append("🏢 RENDER WORKSPACES SELECTION")
+            formatted.append("=" * 50)
+            formatted.append("")
+            formatted.append("📋 Available workspaces:")
             formatted.append("")
 
-            for i, team_data in enumerate(teams, 1):
-                team = team_data.get('team', {})
-                name = team.get('name', 'Unknown')
-                team_id = team.get('id', 'Unknown')
-                email = team.get('email', 'Unknown')
+            workspace_choices = []
+            for i, owner in enumerate(owners, 1):
+                name = owner.get('name', 'Unknown Workspace')
+                owner_id = owner.get('id', 'Unknown ID')
+                email = owner.get('email', 'No email')
+                workspace_type = owner.get('type', 'unknown')
+
+                workspace_choices.append({
+                    'number': i,
+                    'name': name,
+                    'id': owner_id,
+                    'email': email,
+                    'type': workspace_type
+                })
 
                 formatted.append(f"[{i}] {name}")
-                formatted.append(f"    ID: {team_id}")
-                formatted.append(f"    Email: {email}")
+                formatted.append(f"    └── ID: {owner_id}")
+                formatted.append(f"    └── Email: {email}")
+                formatted.append(f"    └── Type: {workspace_type}")
                 formatted.append("")
 
-            formatted.append("USAGE:")
-            formatted.append("• Copy the workspace ID for use in deployment commands")
-            formatted.append("• Use the workspace name in workspace_hint parameters")
-            formatted.append("• Default workspace is used if none specified")
+            formatted.append("💬 LLM: Ask user NOW:")
+            formatted.append('    "Which workspace do you want to use? Enter the number (1, 2, 3...)"')
+            formatted.append("")
+            formatted.append("📝 WORKSPACE ID MAPPING:")
+            for choice in workspace_choices:
+                formatted.append(f"   {choice['number']} → {choice['id']} ({choice['name']})")
+            formatted.append("")
+            formatted.append("⚠️  CRITICAL: Never use defaults - require explicit user selection!")
+            formatted.append("📋 NEXT: Use the selected workspace ID as 'ownerId' in deployment calls")
 
             return "\\n".join(formatted)
 
         except Exception as e:
-            return f"ERROR: Error listing workspaces: {str(e)}"
+            return f"ERROR: Error listing workspaces: {str(e)}\n💡 Check Render API key and permissions"
 
     @mcp.tool()
     async def detect_git_repository() -> str:
         """
-        LLM INSTRUCTION: Use this to show user their current git repository.
+        LLM INSTRUCTION: Use this to detect git repo and project structure.
 
         LLM WORKFLOW:
-        1. Call this tool first
-        2. Show user the detected repository
-        3. Ask: "Use this repository or provide a different GitHub URL?"
-        4. Get user's choice for deployment
+        1. Call this tool FIRST before any deployment
+        2. Show user detected repo and project structure
+        3. Ask: "Use repo '{detected_repo}' or provide different GitHub URL?"
+        4. Ask: "Deploy from '{detected_path}' or specify different project path?"
+        5. Use the user's choices in deployment
 
         Returns:
-            Current git repository URL, branch, and commit status for user selection
+            Git repository, project structure, and deployment recommendations
         """
         try:
-            # Try to get the current git remote
+            results = []
+            results.append("🔍 GIT & PROJECT STRUCTURE DETECTION")
+            results.append("=" * 50)
+
+            # Check for existing git remote
             process = await asyncio.create_subprocess_exec(
                 'git', 'remote', 'get-url', 'origin',
                 stdout=subprocess.PIPE,
@@ -168,52 +193,132 @@ def register_enhanced_deployment_tools(mcp):
             )
             stdout, stderr = await process.communicate()
 
+            current_repo = None
+            current_branch = "master"
+            is_clean = False
+
             if process.returncode == 0:
                 current_repo = stdout.decode().strip()
+                results.append(f"✅ EXISTING GIT REMOTE FOUND")
+                results.append(f"📁 Repository: {current_repo}")
 
-                # Get additional git info
+                # Get branch
                 branch_process = await asyncio.create_subprocess_exec(
                     'git', 'branch', '--show-current',
                     stdout=subprocess.PIPE
                 )
                 branch_stdout, _ = await branch_process.communicate()
                 current_branch = branch_stdout.decode().strip() if branch_process.returncode == 0 else "master"
+                results.append(f"🌿 Branch: {current_branch}")
 
-                # Check if repo is clean
+                # Check if clean
                 status_process = await asyncio.create_subprocess_exec(
                     'git', 'status', '--porcelain',
                     stdout=subprocess.PIPE
                 )
                 status_stdout, _ = await status_process.communicate()
                 is_clean = len(status_stdout.decode().strip()) == 0
-
-                formatted = []
-                formatted.append("GIT: Repository Detection Results")
-                formatted.append("=" * 40)
-                formatted.append(f"📁 Repository: {current_repo}")
-                formatted.append(f"🌿 Branch: {current_branch}")
-                formatted.append(f"✨ Status: {'Clean' if is_clean else 'Has uncommitted changes'}")
-                formatted.append("")
-
-                if not is_clean:
-                    formatted.append("WARNING: Uncommitted changes detected!")
-                    formatted.append("RECOMMENDATION: Commit and push changes before deploying:")
-                    formatted.append("  git add .")
-                    formatted.append("  git commit -m 'Deploy to Render'")
-                    formatted.append("  git push")
-                    formatted.append("")
-
-                formatted.append("USAGE:")
-                formatted.append(f"• Use repo_url: {current_repo}")
-                formatted.append(f"• Use branch: {current_branch}")
-                formatted.append("• Or specify a different repository URL manually")
-
-                return "\\n".join(formatted)
+                results.append(f"✨ Status: {'Clean ✅' if is_clean else 'Has uncommitted changes ⚠️'}")
             else:
-                return "GIT: No git repository found in current directory\\nTIP: Initialize git repo or specify GitHub URL manually"
+                results.append("❌ NO GIT REMOTE FOUND")
+                results.append("💡 You'll need to provide a GitHub URL manually")
+
+            results.append("")
+
+            # Detect project structure - check multiple possible locations
+            cwd = os.getcwd()
+            project_candidates = []
+
+            # Check current directory
+            if os.path.exists(os.path.join(cwd, 'package.json')):
+                project_candidates.append((cwd, "ROOT", "Current directory"))
+
+            # Check common subdirectories
+            common_dirs = ['src', 'app', 'frontend', 'client', 'web', 'www']
+            for subdir in os.listdir(cwd):
+                if os.path.isdir(subdir):
+                    subpath = os.path.join(cwd, subdir)
+                    if os.path.exists(os.path.join(subpath, 'package.json')):
+                        project_candidates.append((subpath, "SUBDIR", f"Subdirectory: {subdir}/"))
+
+            # Also check for nested projects (like our daily-quote case)
+            for root, dirs, files in os.walk(cwd):
+                if 'package.json' in files and root != cwd:
+                    # Skip if already found as direct subdirectory
+                    rel_path = os.path.relpath(root, cwd)
+                    if not any(rel_path.startswith(f"{cand[1]}/") for cand in project_candidates):
+                        project_candidates.append((root, "NESTED", f"Nested project: {rel_path}/"))
+
+            results.append("📦 PROJECT STRUCTURE ANALYSIS:")
+            if project_candidates:
+                results.append(f"Found {len(project_candidates)} potential project(s):")
+                for i, (path, location_type, description) in enumerate(project_candidates, 1):
+                    results.append(f"  [{i}] {description}")
+                    results.append(f"      Path: {path}")
+                    # Quick analysis of this project
+                    try:
+                        with open(os.path.join(path, 'package.json'), 'r') as f:
+                            package_data = json.load(f)
+                        project_name = package_data.get('name', 'unnamed')
+                        has_build_script = 'build' in package_data.get('scripts', {})
+                        results.append(f"      Name: {project_name}")
+                        results.append(f"      Has build script: {'✅' if has_build_script else '❌'}")
+                    except:
+                        results.append(f"      Could not read package.json details")
+                    results.append("")
+
+                results.append("🎯 RECOMMENDATION:")
+                if any(loc_type == "ROOT" for _, loc_type, _ in project_candidates):
+                    results.append("✅ Deploy from ROOT (current directory) - already properly structured")
+                else:
+                    best_candidate = project_candidates[0]
+                    results.append(f"💡 Consider deploying from: {best_candidate[2]}")
+                    results.append(f"⚠️  OR move files to root directory for Render compatibility")
+            else:
+                results.append("❌ No Node.js projects detected (no package.json found)")
+                results.append("💡 This might be a Python project or needs project initialization")
+
+            results.append("")
+
+            # Deployment readiness check
+            results.append("🚀 DEPLOYMENT READINESS:")
+            ready_issues = []
+
+            if not current_repo:
+                ready_issues.append("No git remote configured - you'll need to provide GitHub URL")
+            elif not is_clean:
+                ready_issues.append("Uncommitted changes detected - commit and push before deploying")
+
+            if not project_candidates:
+                ready_issues.append("No deployable projects detected - initialize project first")
+
+            if ready_issues:
+                results.append("❌ NOT READY - Issues to resolve:")
+                for issue in ready_issues:
+                    results.append(f"   • {issue}")
+                results.append("")
+                if not is_clean and current_repo:
+                    results.append("🔧 QUICK FIX - Commit changes:")
+                    results.append("   git add .")
+                    results.append("   git commit -m 'Prepare for deployment'")
+                    results.append("   git push")
+            else:
+                results.append("✅ READY FOR DEPLOYMENT!")
+
+            results.append("")
+            results.append("💬 LLM: Ask user now:")
+            if current_repo:
+                results.append(f'   "Use repository {current_repo} or provide different GitHub URL?"')
+            else:
+                results.append('   "Please provide your GitHub repository URL."')
+
+            if len(project_candidates) > 1:
+                results.append('   "Which project would you like to deploy? (1, 2, 3...)"')
+
+            return "\\n".join(results)
 
         except Exception as e:
-            return f"ERROR: Error detecting git repository: {str(e)}"
+            return f"ERROR: Error detecting git repository and project structure: {str(e)}"
 
     @mcp.tool()
     async def validate_build_environment(project_path: str) -> str:
@@ -313,75 +418,9 @@ def register_enhanced_deployment_tools(mcp):
         except Exception as e:
             return f"ERROR: Error analyzing build environment: {str(e)}"
 
-    @mcp.tool()
-    async def wait_for_deployment_complete(
-        service_id: str,
-        timeout_seconds: int = 300,
-        poll_interval: int = 10
-    ) -> str:
-        """
-        Wait for deployment to complete with progress updates.
-
-        Args:
-            service_id: Service ID to monitor
-            timeout_seconds: Maximum time to wait (default 300 seconds)
-            poll_interval: How often to check status (default 10 seconds)
-
-        Returns:
-            Final deployment status with progress log
-        """
-        try:
-            start_time = time.time()
-            progress_log = []
-            progress_log.append(f"DEPLOY: Monitoring deployment for service {service_id}")
-            progress_log.append(f"⏱️  Timeout: {timeout_seconds} seconds")
-            progress_log.append("")
-
-            while time.time() - start_time < timeout_seconds:
-                elapsed = int(time.time() - start_time)
-
-                # Get deployment status
-                url = f"{RENDER_BASE_URL}/v1/services/{service_id}/deploys?limit=1"
-                response = await run_curl(url)
-
-                if isinstance(response, list) and len(response) > 0:
-                    deploy = response[0].get('deploy', response[0])
-                    status = deploy.get('status', 'unknown')
-
-                    progress_log.append(f"⏳ {elapsed}s: Status = {status.upper()}")
-
-                    if status == 'live':
-                        progress_log.append("")
-                        progress_log.append("✅ DEPLOYMENT SUCCESSFUL!")
-                        progress_log.append(f"🎉 Total time: {elapsed} seconds")
-
-                        # Get service URL if it's a web service
-                        service_url = f"{RENDER_BASE_URL}/v1/services/{service_id}"
-                        service_response = await run_curl(service_url)
-                        service_details = service_response.get('serviceDetails', {})
-                        if 'url' in service_details:
-                            progress_log.append(f"🌐 Service URL: {service_details['url']}")
-
-                        return "\\n".join(progress_log)
-
-                    elif status in ['build_failed', 'deploy_failed', 'canceled']:
-                        progress_log.append("")
-                        progress_log.append(f"❌ DEPLOYMENT FAILED: {status}")
-                        progress_log.append("💡 Check build logs for details")
-                        return "\\n".join(progress_log)
-
-                # Wait before next check
-                await asyncio.sleep(poll_interval)
-
-            # Timeout reached
-            progress_log.append("")
-            progress_log.append("⏰ TIMEOUT REACHED")
-            progress_log.append("💡 Deployment may still be in progress - check manually")
-
-            return "\\n".join(progress_log)
-
-        except Exception as e:
-            return f"ERROR: Error monitoring deployment: {str(e)}"
+    # REMOVED: wait_for_deployment_complete tool
+    # Reason: Problematic separate wait tool replaced with integrated monitoring
+    # Benefits: Better UX, no 404 errors, real-time deployment tracking built-in
 
     @mcp.tool()
     async def get_database_connection_details(database_id: str) -> str:

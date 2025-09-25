@@ -1,5 +1,65 @@
 # CLAUDE CODE INSTRUCTIONS
 
+## FUNDAMENTAL PRINCIPLE: 90% SHARPEN THE AXE, 10% CUT THE TREE
+
+**"Give me six hours to chop down a tree and I will spend the first four sharpening the axe." - Abraham Lincoln**
+
+When dealing with complex systems like deployment toolchains, **preparation and analysis are crucial**:
+
+### 90% Preparation Phase:
+✅ **ALWAYS START WITH:**
+- **Deep system analysis** - Understand the full workflow before coding
+- **User journey mapping** - How will LLMs actually use these tools?
+- **Edge case identification** - What can go wrong? (subdirectories, workspace selection, API failures)
+- **Dependency understanding** - How do tools interact with each other?
+- **Real-world testing** - Try the tools as an actual user would
+- **Error handling design** - Plan for failures before they happen
+
+### 10% Implementation Phase:
+- Write the actual code
+- Implement the solutions to identified problems
+- Handle the edge cases you already discovered
+
+### Why This Matters:
+
+**Bad Approach (Rush to Code):**
+```python
+# Quick tool - doesn't handle subdirectories, assumes defaults
+def deploy_app(name, repo):
+    return create_service(name, repo)  # Missing workspace selection, structure detection
+```
+
+**Good Approach (Sharpen First):**
+```python
+# Well-designed tool after analysis
+def deploy_app(name, repo, workspace_id, project_path):
+    # 90% of work was thinking through these requirements:
+    # - How to handle subdirectories?
+    # - How to ensure workspace selection?
+    # - How to detect project structure?
+    # - How to integrate monitoring?
+    # - How to handle real API failures?
+```
+
+### Real Example From This Project:
+
+**Problems We Could Have Avoided:**
+1. **Repository structure** - Should have analyzed: "Where do projects actually live?"
+2. **Workspace selection** - Should have thought: "How do users actually choose workspaces?"
+3. **Wait tool complexity** - Should have realized: "Do we really need a separate monitoring tool?"
+
+**The Lesson:** Spending time upfront understanding the FULL user journey and system complexity saves massive amounts of rework later.
+
+### Apply This To All Complex Systems:
+- **Deployment pipelines** - Map the entire flow first
+- **Database integrations** - Understand all connection patterns
+- **Authentication systems** - Plan all user paths
+- **API integrations** - Consider all failure modes
+
+**Remember: 90% preparation, 10% implementation = Better tools, fewer bugs, happier users**
+
+---
+
 ## CRITICAL: NO FAKE/SIMULATED API CALLS
 
 **NEVER CREATE FAKE OR SIMULATED API CALLS**
