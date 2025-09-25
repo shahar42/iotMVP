@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "surf-lamp-supabase": {
+      "type": "stdio",
+      "command": "/home/shahar42/Git_Surf_Lamp_Agent/mcp-supabase-server/start_server.sh",
+      "args": [],
+      "env": {}
+    },
+    "render-database": {
+      "type": "stdio",
+      "command": "/home/shahar42/iotMVP/render-database-mcp-server/start_server.sh",
+      "args": [],
+      "env": {
+        "RENDER_API_KEY": "rnd_j6WyOXSMG0bGFbqyYKMBaxUgzF4s"
+      }
+    }
+  }
+}

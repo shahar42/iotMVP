@@ -19,6 +19,7 @@ from deploy_tools import register_deployment_tools
 from deploy_tools_for_db import register_db_deployment_tools
 from scaffolding_tools import register_scaffolding_tools
 from database_tools import register_database_tools
+from enhanced_deployment_tools import register_enhanced_deployment_tools
 
 # Configure logging
 logging.basicConfig(
@@ -36,6 +37,7 @@ register_deployment_tools(mcp)
 register_db_deployment_tools(mcp)
 register_scaffolding_tools(mcp)
 register_database_tools(mcp)
+register_enhanced_deployment_tools(mcp)
 
 # Configuration
 RENDER_API_KEY = os.getenv("RENDER_API_KEY")
