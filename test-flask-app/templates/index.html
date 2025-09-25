@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flask Database Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            min-height: 100vh;
+        }
+        .container {
+            background: rgba(255,255,255,0.1);
+            padding: 30px;
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+        }
+        h1 { text-align: center; margin-bottom: 30px; }
+        .status {
+            background: rgba(0,255,0,0.2);
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover { background: #5a67d8; }
+        input {
+            padding: 10px;
+            border: none;
+            border-radius: 5px;
+            margin: 5px;
+            width: 300px;
+        }
+        .record {
+            background: rgba(255,255,255,0.2);
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 5px;
+        }
+        .error { background: rgba(255,0,0,0.3); }
+        .success { background: rgba(0,255,0,0.3); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 Flask Database Test App</h1>
+
+        <div class="status" id="status">
+            <strong>Status:</strong> <span id="db-status">Checking...</span>
+        </div>
+
+        <div>
+            <h3>Add Record</h3>
+            <input type="text" id="messageInput" placeholder="Enter a test message" value="Hello from Flask test!">
+            <button onclick="addRecord()">Add Record</button>
+            <button onclick="initDb()">Initialize Database</button>
+        </div>
+
+        <div>
+            <h3>Records</h3>
+            <button onclick="loadRecords()">Load Records</button>
+            <div id="records"></div>
+        </div>
+
+        <div id="result"></div>
+    </div>
+
+    <script>
+        async function checkStatus() {
+            try {
+                const response = await fetch('/health');
+                const data = await response.json();
+                document.getElementById('db-status').textContent =
+                    `App: ${data.status}, Database: ${data.database}`;
+                document.getElementById('status').className =
+                    data.database === 'connected' ? 'status success' : 'status error';
+            } catch (error) {
+                document.getElementById('db-status').textContent = 'Error checking status';
+                document.getElementById('status').className = 'status error';
+            }
+        }
+
+        async function addRecord() {
+            const message = document.getElementById('messageInput').value;
+            try {
+                const response = await fetch('/records', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message })
+                });
+                const data = await response.json();
+                document.getElementById('result').innerHTML =
+                    `<div class="record success">Record added: ${JSON.stringify(data)}</div>`;
+                loadRecords(); // Reload records
+            } catch (error) {
+                document.getElementById('result').innerHTML =
+                    `<div class="record error">Error: ${error.message}</div>`;
+            }
+        }
+
+        async function loadRecords() {
+            try {
+                const response = await fetch('/records');
+                const data = await response.json();
+                const recordsHtml = data.records.map(record =>
+                    `<div class="record">
+                        <strong>ID:</strong> ${record.id}<br>
+                        <strong>Message:</strong> ${record.message}<br>
+                        <strong>Created:</strong> ${record.created_at}
+                    </div>`
+                ).join('');
+                document.getElementById('records').innerHTML =
+                    recordsHtml || '<div class="record">No records found</div>';
+            } catch (error) {
+                document.getElementById('records').innerHTML =
+                    `<div class="record error">Error loading records: ${error.message}</div>`;
+            }
+        }
+
+        async function initDb() {
+            try {
+                const response = await fetch('/init-db');
+                const data = await response.json();
+                document.getElementById('result').innerHTML =
+                    `<div class="record ${data.database_initialized ? 'success' : 'error'}">
+                        ${data.message}
+                    </div>`;
+                checkStatus(); // Recheck status
+            } catch (error) {
+                document.getElementById('result').innerHTML =
+                    `<div class="record error">Error: ${error.message}</div>`;
+            }
+        }
+
+        // Check status on page load
+        checkStatus();
+    </script>
+</body>
+</html>
