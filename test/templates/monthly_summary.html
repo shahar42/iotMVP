@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+
+{% block title %}Monthly Summary - Expense Tracker{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="fas fa-chart-bar me-2"></i>{{ current_month }} Summary
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="stats-card">
+                            <div class="stats-number">${{ "%.2f"|format(total_amount) }}</div>
+                            <div>Total Spent</div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <h6>Spending by Category</h6>
+                        {% if category_totals %}
+                            {% for category, amount in category_totals.items() %}
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <span class="category-badge">{{ category }}</span>
+                                <span class="expense-amount">${{ "%.2f"|format(amount) }}</span>
+                            </div>
+                            {% endfor %}
+                        {% else %}
+                            <p class="text-muted">No expenses this month</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h6 class="mb-0">
+                    <i class="fas fa-list me-2"></i>All Expenses This Month
+                </h6>
+            </div>
+            <div class="card-body">
+                {% if expenses %}
+                    {% for expense in expenses %}
+                    <div class="expense-item">
+                        <div class="row align-items-center">
+                            <div class="col-md-5">
+                                <h6 class="mb-1">{{ expense.description }}</h6>
+                                <small class="text-muted">
+                                    <i class="fas fa-calendar me-1"></i>{{ expense.expense_date.strftime('%B %d, %Y') }}
+                                </small>
+                            </div>
+                            <div class="col-md-3">
+                                <span class="category-badge">{{ expense.category }}</span>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="expense-amount">${{ "%.2f"|format(expense.amount) }}</div>
+                            </div>
+                            <div class="col-md-1">
+                                <a href="{{ url_for('delete_expense', expense_id=expense.id) }}" 
+                                   class="btn btn-danger btn-sm"
+                                   onclick="return confirm('Are you sure you want to delete this expense?')">
+                                    <i class="fas fa-trash"></i>
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="text-center py-5">
+                        <i class="fas fa-chart-bar fa-3x text-muted mb-3"></i>
+                        <h5 class="text-muted">No expenses this month</h5>
+                        <p class="text-muted">Start tracking your expenses for this month!</p>
+                        <a href="{{ url_for('add_expense') }}" class="btn btn-primary">
+                            <i class="fas fa-plus me-1"></i>Add Expense
+                        </a>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-3">
+    <div class="col-12">
+        <a href="{{ url_for('index') }}" class="btn btn-secondary">
+            <i class="fas fa-arrow-left me-1"></i>Back to Dashboard
+        </a>
+    </div>
+</div>
+{% endblock %}

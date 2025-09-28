@@ -1,0 +1,10 @@
+{
+    "mcpServers": {
+      "feather-flask-toolkit": {
+        "type": "stdio",
+        "command": "./start_feather_local.sh",
+        "args": [],
+        "env": {}
+      }
+    }
+  }
